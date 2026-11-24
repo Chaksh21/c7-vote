@@ -48,14 +48,22 @@
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
   @media (max-width:760px) { .grid2 { grid-template-columns:1fr; } }
   .phase { display:inline-block; background:var(--yel); border:3px solid var(--dark); border-radius:12px; padding:2px 12px; }
-  .reveal { position:fixed; inset:0; background:var(--yel); display:flex; flex-direction:column; align-items:center;
-    justify-content:safe center; padding:32px 40px 60px; text-align:center; cursor:pointer; overflow:auto; }
-  .reveal > * { flex-shrink:0; }
-  .reveal .tag { width:min(620px, 90vw); margin:18px auto; }
-  .reveal h1 { font-size:96px; }
-  .place { font-family:"Caveat Brush",cursive; font-size:44px; animation:pop .45s ease-out; }
-  .place small { font-family:"Patrick Hand"; font-size:24px; opacity:.75; }
-  .hint { margin-top:24px; font-size:20px; opacity:.6; }
+  .podium { display:flex; align-items:flex-end; justify-content:center; gap:8px; margin:28px 0 0; border-bottom:4px solid var(--dark); }
+  .podium .col { flex:1; max-width:180px; display:flex; flex-direction:column; text-align:center; }
+  .podium .who { font-family:"Caveat Brush",cursive; font-size:24px; line-height:1.05; padding:0 4px 10px; overflow-wrap:anywhere; }
+  .podium .p1 .who { font-size:30px; }
+  .podium .block { border:4px solid var(--dark); border-bottom:0; border-radius:16px 16px 0 0; display:flex;
+    flex-direction:column; align-items:center; padding-top:10px; }
+  .podium .num { font-family:"Caveat Brush",cursive; font-size:56px; line-height:1; }
+  .podium .medal { font-size:18px; }
+  .podium .p1 .block { height:190px; background:#FFC233; }
+  .podium .p2 .block { height:140px; background:#DAD7D0; }
+  .podium .p3 .block { height:105px; background:#E3955E; }
+  .tag.win .body { font-size:clamp(40px, 11vw, 72px); overflow-wrap:anywhere; }
+  .anim .col { animation:rise .7s cubic-bezier(.2,.8,.2,1) both; }
+  .anim .tag.win { animation:tagpop .5s ease-out both; }
+  @keyframes rise { from { transform:translateY(70px); opacity:0 } to { transform:none; opacity:1 } }
+  @keyframes tagpop { from { transform:rotate(-3deg) scale(.6); opacity:0 } to { transform:rotate(-3deg) scale(1); opacity:1 } }
   @keyframes pop { from { transform:scale(.6); opacity:0 } to { transform:scale(1); opacity:1 } }
 </style>
 </head>
@@ -86,7 +94,7 @@ function derive(recs) {
   const ideas = new Map(), votes = new Map();
   for (const r of recs) {
     let d; try { d = JSON.parse(r.data); } catch { continue; }
-    if (r.admin && r.kind === 'phase' && ['ideas', 'vote', 'closed'].includes(d)) phase = d;
+    if (r.admin && r.kind === 'phase' && ['ideas', 'vote', 'closed', 'reveal'].includes(d)) phase = d;
     else if (r.admin && r.kind === 'roster' && Array.isArray(d)) roster = d.map(String).filter(Boolean);
     else if (r.kind === 'idea' && r.who && Array.isArray(d) && phase === 'ideas')
       ideas.set(r.who, d.map(s => String(s).trim().replace(/\s+/g, ' ')).filter(Boolean).slice(0, 4));
@@ -133,7 +141,8 @@ let isAdmin = false;
 let sheetRecs = [], local = [], state = derive([]);
 let me = localStorage.getItem('c7me') || '';
 let picks = [];                 // ballot: picks[0] = 1st choice, '' = empty
-let editVote = false, editIdeas = false, revealStep = -1, loaded = false;
+let editVote = false, editIdeas = false, loaded = false;
+let revealAnim = false, hadData = false;   // play the podium animation only when the reveal starts live
 let draft = null;               // unsent idea text, survives refreshes
 let lastSig = '';
 const seenChips = new Set();
@@ -198,14 +207,16 @@ async function post(kind, who, data) {
 }
 
 function update() {
+  const prev = state.phase;
   state = derive(sheetRecs.concat(local));
+  if (state.phase === 'reveal' && prev !== 'reveal' && hadData) revealAnim = true;
+  hadData = true;
   render();
 }
 
 // ---- Screens ----
 function render() {
   if (!loaded) return;
-  if (revealStep >= 0) return renderReveal();
   if (isAdmin) return renderAdmin();
   app.className = '';
   app.replaceChildren(...mentee().filter(Boolean));
@@ -261,7 +272,8 @@ function mentee() {
     return ballot(pool, who);
   }
 
-  return [...head('Voting closed', 'Drumroll...'), who, h('p', {}, "Watch Chakshu's screen for the winner.")];
+  if (phase === 'reveal') return [podium()];
+  return [...head('Voting closed', 'Drumroll...'), who, h('p', {}, 'The result shows here in a moment.')];
 }
 
 function wall(pool) {
@@ -305,17 +317,18 @@ function renderAdmin() {
   app.className = 'wide';
   const ta = h('textarea', { rows: 13, placeholder: 'One name per line' });
   ta.value = roster.join('\n');
-  const phaseBtn = (p, label) => h('button', { class: phase === p ? '' : 'ghost', onclick: () => {
+  const phaseBtn = (p, label, disabled = false) => h('button', { class: phase === p ? '' : 'ghost', disabled, onclick: () => {
     if (p !== phase && confirmStep(label)) post('phase', '', p);
   } }, label);
   const people = list => h('p', {}, list.length ? list.join(', ') : '-');
   const notVoted = roster.filter(n => !votes.has(n));
   const results = tally(votes, pool);
   app.replaceChildren(
+    phase === 'reveal' ? podium() : '',
     ...head("Chakshu's desk", 'Naamkaran control'),
-    h('p', {}, 'Now: ', h('span', { class: 'phase' }, { ideas: 'Collecting ideas', vote: 'Voting open', closed: 'Voting closed' }[phase])),
+    h('p', {}, 'Now: ', h('span', { class: 'phase' }, { ideas: 'Collecting ideas', vote: 'Voting open', closed: 'Voting closed', reveal: 'Result showing on all phones' }[phase])),
     h('div', { class: 'row' }, phaseBtn('ideas', 'Ideas'), phaseBtn('vote', 'Open voting'), phaseBtn('closed', 'Close voting'),
-      h('button', { disabled: !votes.size, onclick: () => { revealStep = 0; render(); } }, 'Reveal')),
+      phaseBtn('reveal', 'Reveal', !votes.size)),
     h('p', { class: 'muted' }, 'Mentee link: ', h('a', { href: location.pathname }, location.origin + location.pathname)),
     h('div', { class: 'grid2' },
       h('div', {},
@@ -323,7 +336,7 @@ function renderAdmin() {
         people([...ideas.keys()]), ...wall(pool).slice(1),
         h('h2', {}, `Votes: ${votes.size} of ${roster.length}`),
         h('p', { class: 'muted' }, 'Not voted yet:'), people(notVoted),
-        phase === 'closed' ? h('div', { class: 'box' }, results.slice(0, 5).map((r, i) =>
+        phase === 'closed' || phase === 'reveal' ? h('div', { class: 'box' }, results.slice(0, 5).map((r, i) =>
           h('p', {}, `${i + 1}. ${r.name} - ${r.pts} pts`))) : h('p', { class: 'muted' }, 'Scores show here once voting is closed.')),
       h('div', {},
         h('h2', {}, 'Roster'),
@@ -343,20 +356,22 @@ function confirmStep(label) {
   return false;
 }
 
-function renderReveal() {
-  const top = tally(state.votes, state.pool).slice(0, 5);
-  const n = top.length;
-  const shown = Math.min(revealStep, n);              // places shown, from last to first
-  const kids = [h('p', { class: 'eyebrow' }, 'PDL C7 naamkaran'), h('h1', {}, shown < n ? 'And the name is...' : "It's official!")];
-  if (shown === n && n) {
-    kids.push(h('div', { class: 'tag' }, h('div', { class: 'band' }, 'Hello, we are'), h('div', { class: 'body' }, top[0].name)),
-      h('p', { class: 'place' }, h('small', {}, `${top[0].pts} points`)));
-  }
-  for (let i = Math.max(n - shown, 1); i < n; i++)
-    kids.push(h('p', { class: 'place' }, `${i + 1}. ${top[i].name} `, h('small', {}, `${top[i].pts} pts`)));
-  const wrap = h('div', { class: 'reveal', onclick: () => { revealStep = revealStep >= n ? -1 : revealStep + 1; render(); } }, kids,
-    h('p', { class: 'hint' }, revealStep >= n ? 'Click to close' : 'Click for the next place'));
-  app.replaceChildren(wrap);
+// Top 3 on a podium: bronze rises, then silver, then gold, then the name tag.
+function podium() {
+  const top = tally(state.votes, state.pool).slice(0, 3);
+  const anim = revealAnim; revealAnim = false;
+  const medal = ['Gold', 'Silver', 'Bronze'], delay = [5, 2.5, 0];
+  const col = i => top[i]
+    ? h('div', { class: `col p${i + 1}`, style: anim ? `animation-delay:${delay[i]}s` : null },
+        h('div', { class: 'who' }, top[i].name),
+        h('div', { class: 'block' }, h('span', { class: 'num' }, i + 1), h('span', { class: 'medal' }, medal[i])))
+    : h('div', { class: 'col' });
+  return h('div', { class: anim ? 'anim' : '' },
+    h('p', { class: 'eyebrow' }, 'PDL C7 naamkaran'),
+    h('h1', {}, 'And our name is...'),
+    h('div', { class: 'podium' }, col(1), col(0), col(2)),
+    top[0] ? h('div', { class: 'tag win', style: anim ? 'animation-delay:7s' : null },
+      h('div', { class: 'band' }, 'Hello, we are'), h('div', { class: 'body' }, top[0].name)) : null);
 }
 
 (async () => {
