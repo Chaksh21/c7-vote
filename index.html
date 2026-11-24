@@ -93,15 +93,17 @@ function derive(recs) {
   let phase = 'ideas', roster = [];
   const ideas = new Map(), votes = new Map();
   for (const r of recs) {
+    if (r.admin && r.kind === 'reset') { phase = 'ideas'; ideas.clear(); votes.clear(); continue; }   // Start over: keep roster
     let d; try { d = JSON.parse(r.data); } catch { continue; }
     if (r.admin && r.kind === 'phase' && ['ideas', 'vote', 'closed', 'reveal'].includes(d)) phase = d;
     else if (r.admin && r.kind === 'roster' && Array.isArray(d)) roster = d.map(String).filter(Boolean);
-    else if (r.admin && r.kind === 'reset') { phase = 'ideas'; ideas.clear(); votes.clear(); }   // Start over: keep roster
     else if (r.kind === 'idea' && r.who && Array.isArray(d) && phase === 'ideas')
       ideas.set(r.who, d.map(s => String(s).trim().replace(/\s+/g, ' ')).filter(Boolean).slice(0, 4));
     else if (r.kind === 'vote' && r.who && Array.isArray(d) && phase === 'vote')
       votes.set(r.who, d.map(String).slice(0, 5));
   }
+  // Off the roster = off the board: their ideas and votes no longer count.
+  if (roster.length) for (const m of [ideas, votes]) for (const k of [...m.keys()]) if (!roster.includes(k)) m.delete(k);
   const pool = [], seen = new Set();
   for (const list of ideas.values()) for (const s of list) {
     const k = norm(s); if (k && !seen.has(k)) { seen.add(k); pool.push(s); }
@@ -333,7 +335,7 @@ function renderAdmin() {
     h('p', {}, 'Now: ', h('span', { class: 'phase' }, { ideas: 'Collecting ideas', vote: 'Voting open', closed: 'Voting closed', reveal: 'Result showing on all phones' }[phase])),
     h('div', { class: 'row' }, phaseBtn('ideas', 'Ideas'), phaseBtn('vote', 'Open voting'), phaseBtn('closed', 'Close voting'),
       phaseBtn('reveal', 'Reveal', !votes.size),
-      h('button', { class: 'ghost', onclick: () => { if (confirmStep('Start over')) post('reset', '', true); } }, 'Start over')),
+      h('button', { class: 'ghost', onclick: () => { if (confirmStep('Start over')) post('reset', '', 'reset'); } }, 'Start over')),
     h('p', { class: 'muted' }, 'Start over wipes ideas, votes and the result. The roster stays.'),
     h('p', { class: 'muted' }, 'Mentee link: ', h('a', { href: location.pathname }, location.origin + location.pathname)),
     h('div', { class: 'grid2' },
