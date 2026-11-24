@@ -96,6 +96,7 @@ function derive(recs) {
     let d; try { d = JSON.parse(r.data); } catch { continue; }
     if (r.admin && r.kind === 'phase' && ['ideas', 'vote', 'closed', 'reveal'].includes(d)) phase = d;
     else if (r.admin && r.kind === 'roster' && Array.isArray(d)) roster = d.map(String).filter(Boolean);
+    else if (r.admin && r.kind === 'reset') { phase = 'ideas'; ideas.clear(); votes.clear(); }   // Start over: keep roster
     else if (r.kind === 'idea' && r.who && Array.isArray(d) && phase === 'ideas')
       ideas.set(r.who, d.map(s => String(s).trim().replace(/\s+/g, ' ')).filter(Boolean).slice(0, 4));
     else if (r.kind === 'vote' && r.who && Array.isArray(d) && phase === 'vote')
@@ -210,6 +211,7 @@ function update() {
   const prev = state.phase;
   state = derive(sheetRecs.concat(local));
   if (state.phase === 'reveal' && prev !== 'reveal' && hadData) revealAnim = true;
+  if (state.phase !== prev) { picks = []; draft = null; editIdeas = editVote = false; }
   hadData = true;
   render();
 }
@@ -219,7 +221,9 @@ function render() {
   if (!loaded) return;
   if (isAdmin) return renderAdmin();
   app.className = '';
-  app.replaceChildren(...mentee().filter(Boolean));
+  app.replaceChildren(...mentee().filter(Boolean),
+    h('p', { class: 'muted', style: 'margin-top:40px;text-align:center' }, 'Screen stuck? ',
+      h('button', { class: 'ghost small', onclick: () => location.reload() }, 'Refresh')));
 }
 
 function head(eyebrow, title) {
@@ -328,7 +332,9 @@ function renderAdmin() {
     ...head("Chakshu's desk", 'Naamkaran control'),
     h('p', {}, 'Now: ', h('span', { class: 'phase' }, { ideas: 'Collecting ideas', vote: 'Voting open', closed: 'Voting closed', reveal: 'Result showing on all phones' }[phase])),
     h('div', { class: 'row' }, phaseBtn('ideas', 'Ideas'), phaseBtn('vote', 'Open voting'), phaseBtn('closed', 'Close voting'),
-      phaseBtn('reveal', 'Reveal', !votes.size)),
+      phaseBtn('reveal', 'Reveal', !votes.size),
+      h('button', { class: 'ghost', onclick: () => { if (confirmStep('Start over')) post('reset', '', true); } }, 'Start over')),
+    h('p', { class: 'muted' }, 'Start over wipes ideas, votes and the result. The roster stays.'),
     h('p', { class: 'muted' }, 'Mentee link: ', h('a', { href: location.pathname }, location.origin + location.pathname)),
     h('div', { class: 'grid2' },
       h('div', {},
