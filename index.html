@@ -36,9 +36,8 @@
   .pick { display:flex; align-items:center; gap:12px; background:var(--white); border:3px solid var(--dark);
     border-radius:14px; padding:8px 12px; }
   .pick .nm { flex:1; font-size:26px; font-family:"Caveat Brush",cursive; }
-  .opt { display:flex; align-items:center; gap:12px; padding:10px 4px; border-bottom:2px dashed rgba(34,32,28,.2); cursor:pointer; }
-  .opt input { width:26px; height:26px; accent-color:var(--coral); }
-  .opt.off { opacity:.4; }
+  .pick .rank { font-family:"Caveat Brush",cursive; font-size:40px; width:32px; text-align:center; }
+  .pick select.slot { flex:1; width:100%; min-width:0; border:0; padding:6px 4px; }
   .sticky { position:sticky; bottom:12px; margin-top:20px; }
   .sticky button { width:100%; }
   .tag { background:var(--white); border:6px solid var(--dark); border-radius:30px; overflow:hidden; transform:rotate(-3deg);
@@ -133,7 +132,7 @@ const adminKey = new URLSearchParams(location.search).get('admin') || '';
 let isAdmin = false;
 let sheetRecs = [], local = [], state = derive([]);
 let me = localStorage.getItem('c7me') || '';
-let picks = new Map();          // ballot: name -> rank (1..n)
+let picks = [];                 // ballot: picks[0] = 1st choice, '' = empty
 let editVote = false, editIdeas = false, revealStep = -1, loaded = false;
 let draft = null;               // unsent idea text, survives refreshes
 let lastSig = '';
@@ -257,7 +256,7 @@ function mentee() {
         h('p', {}, 'Your top picks:'),
         h('div', { class: 'stack' }, mine.map((n, i) => h('div', { class: 'pick' }, h('span', { class: 'brush' }, i + 1), h('span', { class: 'nm' }, n)))),
         h('p', {}, 'Wait for the reveal on the call.'),
-        h('button', { class: 'ghost small', onclick: () => { editVote = true; picks = new Map(mine.map((n, i) => [n, i + 1])); render(); } }, 'Change my vote')];
+        h('button', { class: 'ghost small', onclick: () => { editVote = true; picks = mine.slice(); render(); } }, 'Change my vote')];
     }
     return ballot(pool, who);
   }
@@ -276,36 +275,28 @@ function wall(pool) {
 
 function ballot(pool, who) {
   const need = Math.min(5, pool.length);
-  for (const n of [...picks.keys()]) if (!pool.includes(n)) picks.delete(n);
-  const nextRank = () => { for (let r = 1; r <= need; r++) if (![...picks.values()].includes(r)) return r; };
-  const toggle = n => { if (picks.has(n)) picks.delete(n); else if (picks.size < need) picks.set(n, nextRank()); render(); };
-  const setRank = (n, r) => {
-    const old = picks.get(n);
-    for (const [m, x] of picks) if (x === r && m !== n) picks.set(m, old);
-    picks.set(n, r); render();
-  };
-  const chosen = [...picks].sort((a, b) => a[1] - b[1]);
-  const top = h('div', { class: 'stack' }, chosen.map(([n, r]) =>
-    h('div', { class: 'pick' },
-      h('select', { 'aria-label': `Rank for ${n}`, onchange: e => setRank(n, +e.target.value) },
-        Array.from({ length: need }, (_, i) => { const o = h('option', { value: i + 1 }, i + 1); o.selected = r === i + 1; return o; })),
-      h('span', { class: 'nm' }, n),
-      h('button', { class: 'ghost small', 'aria-label': `Remove ${n}`, onclick: () => toggle(n) }, 'Remove'))));
-  const list = pool.map(n => {
-    const on = picks.has(n), off = !on && picks.size >= need;
-    const cb = h('input', { type: 'checkbox', disabled: off });
-    cb.checked = on;
-    return h('label', { class: 'opt' + (off ? ' off' : '') }, cb, h('span', {}, n));
+  // picks: one slot per rank, '' = empty. Names gone from the pool are dropped.
+  picks = Array.from({ length: need }, (_, i) => pool.includes(picks[i]) ? picks[i] : '');
+  const filled = picks.filter(Boolean).length;
+  const rows = picks.map((cur, i) => {
+    const sel = h('select', { class: 'slot', 'aria-label': `Choice ${i + 1}`,
+      onchange: e => { picks[i] = e.target.value; render(); } },
+      h('option', { value: '' }, 'Pick a name'),
+      pool.map(n => {
+        const taken = n !== cur && picks.includes(n);
+        const o = h('option', { value: n, disabled: taken }, taken ? `${n} (taken)` : n);
+        o.selected = n === cur;
+        return o;
+      }));
+    return h('div', { class: 'pick' }, h('span', { class: 'rank' }, i + 1), sel);
   });
-  list.forEach((el, i) => el.querySelector('input').addEventListener('change', () => toggle(pool[i])));
-  const submit = h('button', { disabled: picks.size !== need || !need, onclick: () => {
+  const submit = h('button', { disabled: filled !== need || !need, onclick: () => {
     editVote = false;
-    post('vote', me, chosen.map(([n]) => n));
-  } }, picks.size === need ? 'Submit my vote' : `Pick ${need - picks.size} more`);
+    post('vote', me, picks.slice());
+  } }, filled === need ? 'Submit my vote' : `Pick ${need - filled} more`);
   return [...head('Step 2 of 2', `Pick your top ${need}`), who,
-    h('p', {}, `Tick ${need} names. Then set the order: 1 is your favourite.`),
-    chosen.length ? h('h2', {}, 'Your order') : null, chosen.length ? top : null,
-    h('h2', {}, 'All names'), h('div', {}, list),
+    h('p', {}, '1 is your favourite.'),
+    h('div', { class: 'stack' }, rows),
     h('div', { class: 'sticky' }, submit)];
 }
 
