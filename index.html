@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C7 Naamkaran</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat+Brush&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root { --dark:#22201C; --yel:#FFC233; --cream:#FFF9EC; --coral:#FF7A59; --white:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--cream); color:var(--dark); font:22px/1.3 "Patrick Hand",system-ui,sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:28px 20px 80px; }
+  main.wide { max-width:980px; }
+  h1,h2,.brush { font-family:"Caveat Brush",cursive; font-weight:400; margin:0; }
+  h1 { font-size:64px; line-height:.95; }
+  h2 { font-size:38px; margin:28px 0 10px; }
+  p { margin:8px 0; }
+  .eyebrow { font-size:24px; }
+  .muted { opacity:.7; font-size:19px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; font-family:"Caveat Brush",cursive; font-size:28px; color:var(--white); background:var(--dark);
+    border:3px solid var(--dark); border-radius:18px 18px 18px 4px; padding:10px 22px; cursor:pointer; min-height:52px; }
+  button.ghost { background:transparent; color:var(--dark); }
+  button.small { font-size:22px; padding:6px 14px; min-height:40px; }
+  button:disabled { opacity:.35; cursor:not-allowed; }
+  .names { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  .names button { background:var(--white); color:var(--dark); border-radius:14px; }
+  input[type=text], textarea, select { font:inherit; color:var(--dark); background:var(--white); border:3px solid var(--dark);
+    border-radius:14px; padding:10px 14px; width:100%; }
+  select { width:auto; min-height:48px; font-family:"Caveat Brush",cursive; font-size:26px; padding:4px 10px; }
+  .stack > * + * { margin-top:10px; }
+  .wall { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+  .chip { background:var(--white); border:3px solid var(--dark); border-radius:14px; padding:6px 14px; }
+  .chip.new { animation:pop .4s ease-out; }
+  .pick { display:flex; align-items:center; gap:12px; background:var(--white); border:3px solid var(--dark);
+    border-radius:14px; padding:8px 12px; }
+  .pick .nm { flex:1; font-size:26px; font-family:"Caveat Brush",cursive; }
+  .opt { display:flex; align-items:center; gap:12px; padding:10px 4px; border-bottom:2px dashed rgba(34,32,28,.2); cursor:pointer; }
+  .opt input { width:26px; height:26px; accent-color:var(--coral); }
+  .opt.off { opacity:.4; }
+  .sticky { position:sticky; bottom:12px; margin-top:20px; }
+  .sticky button { width:100%; }
+  .tag { background:var(--white); border:6px solid var(--dark); border-radius:30px; overflow:hidden; transform:rotate(-3deg);
+    margin:30px auto; max-width:620px; }
+  .tag .band { background:var(--coral); color:var(--white); text-align:center; font-family:"Caveat Brush",cursive; font-size:44px; padding:16px; }
+  .tag .body { text-align:center; font-family:"Caveat Brush",cursive; font-size:72px; line-height:1; padding:36px 20px 44px; }
+  .box { background:var(--white); border:3px solid var(--dark); border-radius:18px; padding:16px 18px; margin-top:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:760px) { .grid2 { grid-template-columns:1fr; } }
+  .phase { display:inline-block; background:var(--yel); border:3px solid var(--dark); border-radius:12px; padding:2px 12px; }
+  .reveal { position:fixed; inset:0; background:var(--yel); display:flex; flex-direction:column; align-items:center;
+    justify-content:safe center; padding:32px 40px 60px; text-align:center; cursor:pointer; overflow:auto; }
+  .reveal > * { flex-shrink:0; }
+  .reveal .tag { width:min(620px, 90vw); margin:18px auto; }
+  .reveal h1 { font-size:96px; }
+  .place { font-family:"Caveat Brush",cursive; font-size:44px; animation:pop .45s ease-out; }
+  .place small { font-family:"Patrick Hand"; font-size:24px; opacity:.75; }
+  .hint { margin-top:24px; font-size:20px; opacity:.6; }
+  @keyframes pop { from { transform:scale(.6); opacity:0 } to { transform:scale(1); opacity:1 } }
+</style>
+</head>
+<body>
+<main id="app"><p>Loading...</p></main>
+
+<script id="logic">
+// ---- Pure logic (tested in test.js) ----
+const norm = s => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
+
+function parseCSV(t) {
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+    else if (c !== '\r') f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+
+// recs: [{kind, who, data (JSON string), admin (bool)}] in submit order
+function derive(recs) {
+  let phase = 'ideas', roster = [];
+  const ideas = new Map(), votes = new Map();
+  for (const r of recs) {
+    let d; try { d = JSON.parse(r.data); } catch { continue; }
+    if (r.admin && r.kind === 'phase' && ['ideas', 'vote', 'closed'].includes(d)) phase = d;
+    else if (r.admin && r.kind === 'roster' && Array.isArray(d)) roster = d.map(String).filter(Boolean);
+    else if (r.kind === 'idea' && r.who && Array.isArray(d) && phase === 'ideas')
+      ideas.set(r.who, d.map(s => String(s).trim().replace(/\s+/g, ' ')).filter(Boolean).slice(0, 4));
+    else if (r.kind === 'vote' && r.who && Array.isArray(d) && phase === 'vote')
+      votes.set(r.who, d.map(String).slice(0, 5));
+  }
+  const pool = [], seen = new Set();
+  for (const list of ideas.values()) for (const s of list) {
+    const k = norm(s); if (k && !seen.has(k)) { seen.add(k); pool.push(s); }
+  }
+  return { phase, roster, ideas, votes, pool };
+}
+
+// 1st = 5 pts ... 5th = 1. Tie: more 1st places, then more 2nd, and so on.
+function tally(votes, pool) {
+  const by = new Map(pool.map(s => [norm(s), { name: s, pts: 0, ranks: [0, 0, 0, 0, 0] }]));
+  for (const ballot of votes.values()) {
+    const used = new Set();
+    ballot.forEach((s, i) => {
+      const k = norm(s), e = by.get(k);
+      if (e && !used.has(k)) { used.add(k); e.pts += 5 - i; e.ranks[i]++; }
+    });
+  }
+  return [...by.values()].sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    for (let i = 0; i < 5; i++) if (b.ranks[i] !== a.ranks[i]) return b.ranks[i] - a.ranks[i];
+    return 0;
+  });
+}
+</script>
+
+<script>
+// ---- Config: filled in after the hidden Form is made ----
+const CFG = {
+  form: 'https://docs.google.com/forms/d/e/1FAIpQLSdffLQgx3GoYlsIhsjfvLPUoZ6Io4thZPj-tLP50d8dbC0roQ/formResponse',
+  entry: { kind: 'entry.264300942', who: 'entry.1319551', data: 'entry.1719034373', key: 'entry.316350964' },
+  sheet: '1nBiycG6Hbu-iPqBkvmY7bEYJHXqDmupZ3Uw_pkziW_8',
+  adminHash: 'f5dcb7af09b5e287c74e94f71ed81a3d7c9b233dd61dabd00067ca41581aa794',
+};
+
+const app = document.getElementById('app');
+const adminKey = new URLSearchParams(location.search).get('admin') || '';
+let isAdmin = false;
+let sheetRecs = [], local = [], state = derive([]);
+let me = localStorage.getItem('c7me') || '';
+let picks = new Map();          // ballot: name -> rank (1..n)
+let editVote = false, editIdeas = false, revealStep = -1, loaded = false;
+let draft = null;               // unsent idea text, survives refreshes
+let lastSig = '';
+const seenChips = new Set();
+const hashCache = new Map();
+
+async function sha(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+async function isAdminKey(k) {
+  if (!k) return false;
+  if (!hashCache.has(k)) hashCache.set(k, (await sha(k)) === CFG.adminHash);
+  return hashCache.get(k);
+}
+
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return el;
+}
+
+// ---- Sheet sync ----
+async function load() {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${CFG.sheet}/gviz/tq?tqx=out:csv&headers=1&t=${Date.now()}`;
+    const rows = parseCSV(await (await fetch(url, { cache: 'no-store' })).text());
+    const head = rows.shift().map(s => s.trim().toLowerCase());
+    const col = n => head.indexOf(n);
+    const recs = [];
+    for (const r of rows) {
+      const kind = r[col('kind')] || '';
+      if (!kind) continue;
+      recs.push({ kind, who: r[col('who')] || '', data: r[col('data')] || '',
+        admin: await isAdminKey(r[col('key')] || '') });
+    }
+    sheetRecs = recs;
+    const inSheet = new Set(recs.map(r => r.kind + '|' + r.who + '|' + r.data));
+    local = local.filter(r => !inSheet.has(r.kind + '|' + r.who + '|' + r.data));
+    const sig = JSON.stringify(recs) + JSON.stringify(local);
+    if (loaded && sig === lastSig) return;      // nothing new: don't redraw
+    lastSig = sig;
+    loaded = true;
+    update();
+  } catch (e) { console.warn('load failed', e); }
+}
+
+async function post(kind, who, data) {
+  const json = JSON.stringify(data);
+  const admin = isAdmin && (kind === 'phase' || kind === 'roster');
+  local.push({ kind, who, data: json, admin });
+  update();
+  if (!isAdmin) window.scrollTo(0, 0);
+  const body = new URLSearchParams({ [CFG.entry.kind]: kind, [CFG.entry.who]: who,
+    [CFG.entry.data]: json, [CFG.entry.key]: admin ? adminKey : '' });
+  await fetch(CFG.form, { method: 'POST', mode: 'no-cors', body });
+}
+
+function update() {
+  state = derive(sheetRecs.concat(local));
+  render();
+}
+
+// ---- Screens ----
+function render() {
+  if (!loaded) return;
+  if (revealStep >= 0) return renderReveal();
+  if (isAdmin) return renderAdmin();
+  app.className = '';
+  app.replaceChildren(...mentee().filter(Boolean));
+}
+
+function head(eyebrow, title) {
+  return [h('p', { class: 'eyebrow' }, eyebrow), h('h1', {}, title)];
+}
+
+function mentee() {
+  const { phase, roster, ideas, votes, pool } = state;
+  if (!roster.length) return [...head('PDL C7', 'Naamkaran'), h('p', {}, 'Hang on, Chakshu is setting up.')];
+  if (!me || !roster.includes(me)) {
+    return [...head('PDL C7 naamkaran', 'Who are you?'),
+      h('div', { class: 'names' }, roster.map(n => h('button', { onclick: () => { me = n; localStorage.setItem('c7me', n); render(); } }, n)))];
+  }
+  const who = h('p', { class: 'muted' }, `You are ${me}. `,
+    h('a', { href: '#', onclick: e => { e.preventDefault(); me = ''; localStorage.removeItem('c7me'); render(); } }, 'Not you?'));
+
+  if (phase === 'ideas') {
+    const mine = ideas.get(me);
+    if (mine && !editIdeas) {
+      return [...head('Ideas sent!', 'Nice one.'), who,
+        h('p', {}, 'You can change them till voting opens.'),
+        h('button', { class: 'ghost small', onclick: () => { editIdeas = true; render(); } }, 'Change my ideas'),
+        ...wall(pool)];
+    }
+    if (!draft) draft = [0, 1, 2, 3].map(i => (mine || [])[i] || '');
+    const inputs = [0, 1, 2, 3].map(i => h('input', { type: 'text', maxlength: 40, value: draft[i],
+      placeholder: i === 0 ? 'Your idea (needed)' : 'Another idea (optional)',
+      oninput: e => { draft[i] = e.target.value; check(); } }));
+    const send = h('button', { disabled: true, onclick: () => {
+      const list = inputs.map(x => x.value.trim()).filter(Boolean);
+      if (!list.length) return;
+      editIdeas = false; draft = null; post('idea', me, list);
+    } }, 'Send my ideas');
+    function check() { send.disabled = !inputs.some(x => x.value.trim()); }
+    check();
+    return [...head('Step 1 of 2', 'Name our group'), who,
+      h('p', {}, 'Give 1 to 4 names for our group.'),
+      h('div', { class: 'stack' }, inputs), h('div', { class: 'sticky' }, send), ...wall(pool)];
+  }
+
+  if (phase === 'vote') {
+    const mine = votes.get(me);
+    if (mine && !editVote) {
+      return [...head('Vote in!', 'Done.'), who,
+        h('p', {}, 'Your top picks:'),
+        h('div', { class: 'stack' }, mine.map((n, i) => h('div', { class: 'pick' }, h('span', { class: 'brush' }, i + 1), h('span', { class: 'nm' }, n)))),
+        h('p', {}, 'Wait for the reveal on the call.'),
+        h('button', { class: 'ghost small', onclick: () => { editVote = true; picks = new Map(mine.map((n, i) => [n, i + 1])); render(); } }, 'Change my vote')];
+    }
+    return ballot(pool, who);
+  }
+
+  return [...head('Voting closed', 'Drumroll...'), who, h('p', {}, "Watch Chakshu's screen for the winner.")];
+}
+
+function wall(pool) {
+  const chips = pool.map(n => {
+    const k = norm(n), isNew = !seenChips.has(k); seenChips.add(k);
+    return h('span', { class: 'chip' + (isNew ? ' new' : '') }, n);
+  });
+  return [h('h2', {}, `Ideas so far (${pool.length})`),
+    pool.length ? h('div', { class: 'wall' }, chips) : h('p', { class: 'muted' }, 'No ideas yet. Be the first!')];
+}
+
+function ballot(pool, who) {
+  const need = Math.min(5, pool.length);
+  for (const n of [...picks.keys()]) if (!pool.includes(n)) picks.delete(n);
+  const nextRank = () => { for (let r = 1; r <= need; r++) if (![...picks.values()].includes(r)) return r; };
+  const toggle = n => { if (picks.has(n)) picks.delete(n); else if (picks.size < need) picks.set(n, nextRank()); render(); };
+  const setRank = (n, r) => {
+    const old = picks.get(n);
+    for (const [m, x] of picks) if (x === r && m !== n) picks.set(m, old);
+    picks.set(n, r); render();
+  };
+  const chosen = [...picks].sort((a, b) => a[1] - b[1]);
+  const top = h('div', { class: 'stack' }, chosen.map(([n, r]) =>
+    h('div', { class: 'pick' },
+      h('select', { 'aria-label': `Rank for ${n}`, onchange: e => setRank(n, +e.target.value) },
+        Array.from({ length: need }, (_, i) => { const o = h('option', { value: i + 1 }, i + 1); o.selected = r === i + 1; return o; })),
+      h('span', { class: 'nm' }, n),
+      h('button', { class: 'ghost small', 'aria-label': `Remove ${n}`, onclick: () => toggle(n) }, 'Remove'))));
+  const list = pool.map(n => {
+    const on = picks.has(n), off = !on && picks.size >= need;
+    const cb = h('input', { type: 'checkbox', disabled: off });
+    cb.checked = on;
+    return h('label', { class: 'opt' + (off ? ' off' : '') }, cb, h('span', {}, n));
+  });
+  list.forEach((el, i) => el.querySelector('input').addEventListener('change', () => toggle(pool[i])));
+  const submit = h('button', { disabled: picks.size !== need || !need, onclick: () => {
+    editVote = false;
+    post('vote', me, chosen.map(([n]) => n));
+  } }, picks.size === need ? 'Submit my vote' : `Pick ${need - picks.size} more`);
+  return [...head('Step 2 of 2', `Pick your top ${need}`), who,
+    h('p', {}, `Tick ${need} names. Then set the order: 1 is your favourite.`),
+    chosen.length ? h('h2', {}, 'Your order') : null, chosen.length ? top : null,
+    h('h2', {}, 'All names'), h('div', {}, list),
+    h('div', { class: 'sticky' }, submit)];
+}
+
+function renderAdmin() {
+  const { phase, roster, ideas, votes, pool } = state;
+  app.className = 'wide';
+  const ta = h('textarea', { rows: 13, placeholder: 'One name per line' });
+  ta.value = roster.join('\n');
+  const phaseBtn = (p, label) => h('button', { class: phase === p ? '' : 'ghost', onclick: () => {
+    if (p !== phase && confirmStep(label)) post('phase', '', p);
+  } }, label);
+  const people = list => h('p', {}, list.length ? list.join(', ') : '-');
+  const notVoted = roster.filter(n => !votes.has(n));
+  const results = tally(votes, pool);
+  app.replaceChildren(
+    ...head("Chakshu's desk", 'Naamkaran control'),
+    h('p', {}, 'Now: ', h('span', { class: 'phase' }, { ideas: 'Collecting ideas', vote: 'Voting open', closed: 'Voting closed' }[phase])),
+    h('div', { class: 'row' }, phaseBtn('ideas', 'Ideas'), phaseBtn('vote', 'Open voting'), phaseBtn('closed', 'Close voting'),
+      h('button', { disabled: !votes.size, onclick: () => { revealStep = 0; render(); } }, 'Reveal')),
+    h('p', { class: 'muted' }, 'Mentee link: ', h('a', { href: location.pathname }, location.origin + location.pathname)),
+    h('div', { class: 'grid2' },
+      h('div', {},
+        h('h2', {}, `Ideas (${pool.length}) from ${ideas.size} people`),
+        people([...ideas.keys()]), ...wall(pool).slice(1),
+        h('h2', {}, `Votes: ${votes.size} of ${roster.length}`),
+        h('p', { class: 'muted' }, 'Not voted yet:'), people(notVoted),
+        phase === 'closed' ? h('div', { class: 'box' }, results.slice(0, 5).map((r, i) =>
+          h('p', {}, `${i + 1}. ${r.name} - ${r.pts} pts`))) : h('p', { class: 'muted' }, 'Scores show here once voting is closed.')),
+      h('div', {},
+        h('h2', {}, 'Roster'),
+        h('p', { class: 'muted' }, 'One name per line. Mentees tap their name.'),
+        ta, h('div', { class: 'row', style: 'margin-top:10px' },
+          h('button', { onclick: () => post('roster', '', ta.value.split('\n').map(s => s.trim()).filter(Boolean)) }, 'Save roster')))));
+}
+
+function confirmStep(label) {
+  // inline two-tap confirm, no browser dialogs
+  if (confirmStep.armed === label) { confirmStep.armed = null; return true; }
+  confirmStep.armed = label;
+  setTimeout(() => { if (confirmStep.armed === label) { confirmStep.armed = null; render(); } }, 3000);
+  render();
+  const btn = [...app.querySelectorAll('button')].find(b => b.textContent === label);
+  if (btn) btn.textContent = 'Tap again';
+  return false;
+}
+
+function renderReveal() {
+  const top = tally(state.votes, state.pool).slice(0, 5);
+  const n = top.length;
+  const shown = Math.min(revealStep, n);              // places shown, from last to first
+  const kids = [h('p', { class: 'eyebrow' }, 'PDL C7 naamkaran'), h('h1', {}, shown < n ? 'And the name is...' : "It's official!")];
+  if (shown === n && n) {
+    kids.push(h('div', { class: 'tag' }, h('div', { class: 'band' }, 'Hello, we are'), h('div', { class: 'body' }, top[0].name)),
+      h('p', { class: 'place' }, h('small', {}, `${top[0].pts} points`)));
+  }
+  for (let i = Math.max(n - shown, 1); i < n; i++)
+    kids.push(h('p', { class: 'place' }, `${i + 1}. ${top[i].name} `, h('small', {}, `${top[i].pts} pts`)));
+  const wrap = h('div', { class: 'reveal', onclick: () => { revealStep = revealStep >= n ? -1 : revealStep + 1; render(); } }, kids,
+    h('p', { class: 'hint' }, revealStep >= n ? 'Click to close' : 'Click for the next place'));
+  app.replaceChildren(wrap);
+}
+
+(async () => {
+  isAdmin = await isAdminKey(adminKey);
+  await load();
+  setInterval(() => { if (!document.hidden && !document.activeElement?.matches('input[type=text],textarea,select')) load(); }, 3000);
+})();
+</script>
+</body>
+</html>
